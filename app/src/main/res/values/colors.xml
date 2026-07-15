@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="graphite_900">#FF20282D</color>
+    <color name="graphite_950">#FF11171A</color>
+    <color name="cyan_300">#FF66C8CE</color>
+    <color name="cyan_700">#FF007C83</color>
+</resources>

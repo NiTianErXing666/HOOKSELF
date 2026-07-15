@@ -1,0 +1,16 @@
+[versions]
+agp = "9.2.1"
+junitVersion = "1.3.0"
+testRunner = "1.7.0"
+appcompat = "1.7.1"
+material = "1.14.0"
+
+[libraries]
+ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+test-runner = { group = "androidx.test", name = "runner", version.ref = "testRunner" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }

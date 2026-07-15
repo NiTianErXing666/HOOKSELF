@@ -1,0 +1,26 @@
+struct HookselfFramework {
+    pthread_mutex_t mutex;
+    pthread_cond_t lifecycle_cv;
+    uint32_t active_calls;
+    uint32_t closing;
+    uint32_t deferred_destroy;
+    uint32_t destroy_waiter;
+    uint32_t lifecycle_busy;
+    uint32_t runtime_starting;
+    uint32_t registry_frozen;
+    uint32_t runtime_users;
+    HookselfRuleHandle next_handle;
+    uint32_t next_path_rule_id;
+    uint64_t runtime_generation;
+    HookselfRuntime* runtime;
+    HookselfFramework* registry_next;
+    HookselfConfig config;
+    PathRuleSlot path_slots[HOOKSELF_MAX_PATH_RULES];
+    SyscallRuleSlot syscall_slots[HOOKSELF_MAX_SYSCALL_RULES];
+    HookselfVirtualFile virtual_files[HOOKSELF_MAX_VIRTUAL_FILES];
+    uint8_t* virtual_contents[HOOKSELF_MAX_VIRTUAL_FILES];
+    HookselfPathRule built_path_rules[HOOKSELF_MAX_PATH_RULES];
+    HookselfSyscallRule built_syscall_rules[HOOKSELF_MAX_SYSCALL_RULES];
+    HookselfLogSink log_sink;
+    void* log_sink_user_data;
+};

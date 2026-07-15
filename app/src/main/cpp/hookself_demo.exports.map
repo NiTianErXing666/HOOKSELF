@@ -1,0 +1,7 @@
+HOOKSELF_DEMO_1.0 {
+    global:
+        Java_com_io_hookself_MainActivity_*;
+        Java_com_io_hookself_NativeTestBridge_*;
+    local:
+        *;
+};

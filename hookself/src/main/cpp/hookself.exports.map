@@ -1,0 +1,7 @@
+HOOKSELF_1.0 {
+    global:
+        hookself_*;
+        Java_com_io_hookself_NativeTestBridge_*;
+    local:
+        *;
+};

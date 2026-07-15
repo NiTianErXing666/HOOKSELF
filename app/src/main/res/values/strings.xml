@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">hookself</string>
+    <string name="demo_title">HookSelf 日志观测</string>
+    <string name="attach_self">附加自己</string>
+    <string name="open_stat_status">open/stat /proc/self/status</string>
+    <string name="ptrace_check">ptrace 检测</string>
+    <string name="demo_detached">未附加</string>
+    <string name="demo_attaching">正在附加</string>
+    <string name="demo_attached">已附加</string>
+    <string name="demo_attach_failed">附加失败</string>
+    <string name="demo_running">执行中</string>
+    <string name="demo_no_results">暂无结果</string>
+</resources>

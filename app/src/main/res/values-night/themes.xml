@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.Hookself" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/graphite_900</item>
+        <item name="colorPrimaryVariant">@color/graphite_950</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/cyan_300</item>
+        <item name="colorSecondaryVariant">@color/cyan_300</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+    </style>
+</resources>
