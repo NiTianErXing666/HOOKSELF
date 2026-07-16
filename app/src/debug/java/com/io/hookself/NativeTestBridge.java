@@ -7,6 +7,8 @@ import java.io.File;
 public final class NativeTestBridge {
     static {
         System.loadLibrary("hookself");
+        System.loadLibrary("hookself_inline");
+        System.loadLibrary("hookself_elf");
         System.loadLibrary("hookself_demo");
     }
 
@@ -21,6 +23,8 @@ public final class NativeTestBridge {
     public static native String runM4CapabilityProbe();
     public static native String runM4CapabilityProbeForceFallback();
     public static native String runM4FaultProbe(int flags);
+    public static native String runInlineHookSelfTest();
+    public static native String runElfHookSelfTest();
 
     public static String runFrameworkSelfTest(Context context) {
         return runFrameworkSelfTestNative(virtualBackingDir(context));

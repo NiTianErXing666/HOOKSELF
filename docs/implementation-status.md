@@ -1,6 +1,6 @@
 # hookself 实现与验证状态
 
-更新日期：2026-07-15
+更新日期：2026-07-16
 
 > 注：5.10.110 的性能和 instrumentation 数字保留为迁移前历史记录；当前 public ABI v6、
 > internal shared ABI v12 与 regular virtual backing 的验收结果见下方 USB 回归。Linux 5.1
@@ -20,15 +20,22 @@
 ## 当前架构
 
 - 工程拆分为 `:hookself` Android Library 与 `:app` demo/instrumentation 宿主。
-  `:hookself` 通过 AAR/Prefab 发布 `libhookself.so`、`hookself/framework.h` 和
-  `hookself/public_api.h`；`:app` 仅构建 `libhookself_demo.so` 并通过
-  `hookself::hookself` 链接公共库。
+  `:hookself` 通过 AAR/Prefab 发布 syscall/path 用的 `libhookself.so`、ARM64 inline hook 用的
+  `libhookself_inline.so` 与内存 ELF/PLT-GOT hook 用的 `libhookself_elf.so`；公共 target 分别为
+  `hookself::hookself`、`hookself::hookself_inline` 和 `hookself::hookself_elf`。`:app` Release
+  构建 `libhookself_demo.so`，Debug 变体额外构建真实 ELF fixture 做黑盒回归。
 - native 实现按 `api`、`arch`、`platform`、`tracer`、`internal` 和 `test_support` 分层。
   `framework.cpp`、`resident_session.cpp`、`runtime_api.cpp` 与 `path_state.cpp` 只保留编排和
   共同 include，具体职责拆入 `api/framework`、`api/runtime`、`internal/resident_session` 与
   `tracer/path_state`。facade 单个职责片段不超过 330 行。
 - `HOOKSELF_BUILD_TEST_SUPPORT` 只在 library Debug 构建开启。native self-test、probe、测试
   JNI 和 Java `NativeTestBridge` 不进入 release 业务路径。
+- inline-hook public ABI v1 独立于 syscall/path public ABI v6。它使用 4 字节原子入口 branch、
+  near bridge、PC-relative relocation、BTI/PAC 入口处理、generation handle 和 retained
+  trampoline。
+- ELF/GOT-hook public ABI v1 同样独立。它从 `dl_iterate_phdr + PT_DYNAMIC` 解析 GNU/SysV
+  dynsym，在 ARM64 `R_AARCH64_JUMP_SLOT` 上执行 64 位 CAS 事务，恢复 full RELRO 权限并保留
+  recoverable handle；三个 HookSelf 动态库互相没有链接依赖。
 - public ABI v6，internal shared ABI v12，task table v8。public v6 新增调用方提供的
   `virtual_backing_dir`；shared v12 提供 64 个并发 runtime API bypass TID 槽，其中 63 个供
   普通调用、1 个专供 destroy，另含 selective teardown freeze/release 与 exact-FD capability；
@@ -281,14 +288,70 @@
 
 ## 当前验证结果
 
+### ARM64 ELF/GOT-hook ABI v1（2026-07-16）
+
+- 新增独立 `libhookself_elf.so`、Prefab `hookself::hookself_elf` 与
+  `<hookself/elf_hook.h>`；公开 ABI v1 包含 module info、GNU/SysV dynsym resolve、
+  install/hook、remove/unhook、find/info、capability 和 typed result。
+- Debug fixture 包含纯 GNU hash provider、纯 SysV hash provider、同时包含两种 hash 且启用
+  full RELRO/BIND_NOW 的 consumer、在 `dlclose` 析构中回调 ELF API 的 loader-lock DSO，以及
+  用于验证卸载后 ORPHANED 状态的独立 consumer。
+  `llvm-readelf` 已确认 consumer 的目标导入为真实 `R_AARCH64_JUMP_SLOT`，GOT 位于
+  `PT_GNU_RELRO`。
+- Android 15 ARM64 `elfHookOnly` 当前为 `PASS`：232 checks、0 failures、GNU/SysV resolve 各
+  1 条、103 次完整 hook cycle、6 次 RELRO 恢复复核、1 条外部 slot conflict、1 条
+  loader/registry 锁序与 loader-callback fork、8 个并发 fork snapshot、1 个 execute-only
+  replacement、2 个确定性 recovery transaction、1 个卸载后 ORPHANED module，以及
+  24,975,030 次并发 GOT 调用，未观察到 torn pointer。
+- 内存解析器对 dynamic/hash/symbol/string/relocation 做 `PT_LOAD` 范围、整数溢出和自然对齐
+  校验；支持 Android 主条目 realpath 与 execute-only/XOM function mapping。
+- registry 不在持锁时调用 `dl_iterate_phdr()`；`INSTALLING/REMOVING` reservation 消除了
+  bionic loader destructor 与 registry 的 ABBA 顺序。mutation lease 延续到 loader callback
+  返回之后，所有状态写都进入 fork gate；权限或回滚持续失败时发布可由 find/info 查询的
+  `RECOVERY_REQUIRED` handle，而不是留下不可查询的生效 slot。
+- v1 明确限定当前已加载 module 的函数型 `DT_JMPREL/Elf64_Rela/JUMP_SLOT`。symbol version、
+  后续 `dlopen` 订阅、GLOB_DAT/data relocation、APS2/RELR 与 module-by-address selector 保留为
+  新 API 扩展，不改变当前 handle 语义。
+
+### ARM64 inline-hook ABI v1（2026-07-15）
+
+- `:hookself:assembleDebug`、`:hookself:assembleRelease`、`:app:assembleDebug`、
+  `:app:assembleDebugAndroidTest`、`:app:assembleRelease` 和 `:app:lintDebug` 在最终代码上通过。
+- Release AAR 为 1,396,057 字节，包含三个 arm64-v8a `.so` 和三个 Prefab module；
+  `libhookself_inline.so` stripped 后为 21,136 字节，仅导出 11 个
+  `hookself_inline_*@@HOOKSELF_INLINE_1.0`；`libhookself_elf.so` stripped 后为 30,728 字节，
+  仅导出 13 个 `hookself_elf_*@@HOOKSELF_ELF_1.0`。嵌入的公共头与源码一致，三个库互相没有
+  `DT_NEEDED`。
+- 三个 Release 库均无 `TEXTREL`，GNU stack 不可执行，具有 GNU RELRO 与 BIND_NOW；三个
+  Release 库均不含 fixture、JNI 或 self-test 导出/字符串。
+- `scripts/run-inline-encoding-tests.ps1` 以 NDK 28/API 24、强警告和 minimal UBSan 两种配置
+  编译并在 USB ARM64 设备执行，全部通过。覆盖 immediate 边界、绝对地址对齐、7 类 literal
+  memory 编码、BL 的原始 X30、BLR/PAuth-link 与 exception-generation 拒绝、literal 部分覆盖、
+  CAS conflict 和目标权限恢复。
+- 真机 `inlineHookOnly` 最终为 `PASS`：1165 checks、0 failures、20 个成功 fixture、14 个
+  expanded relocation、1 条 BTI 入口、2 条 PAC 入口、1 条 unsupported relocation、96 轮
+  并发 install/remove、40,208,848 次并发 target 调用、0 个 torn result、0 个 RWX 残留。
+- 设备 HWCAP2 发布 BTI。测试用动态 `PROT_BTI` guarded page 验证安装前、active 和 removed
+  三阶段 `VmFlags: bt` 均保留，并实际命中 far bridge；target、replacement、original 和恢复
+  路径全部通过。
+- 最终 `ProbeStressTest` 完整类为 `OK (8 tests)`，57.429 秒。inline 专项先完成后，既有
+  demo/framework、nested ptrace、proc virtual、repeatAll、resident 和 selective runtime 均
+  继续通过；测试结束后无 App/tracer 进程残留，也没有本轮 crash buffer 记录。
+- 当前真机是 4 KiB page。16 KiB page、`PROT_MTE`、FEAT_GCS、far guarded replacement、
+  raw-clone/atfork，以及 syscall/proc runtime 正在运行时交错 inline install/remove 仍待专门
+  矩阵。trampoline 页尚未标记 `PROT_BTI` guarded，且暂未注册 unwind metadata；异步采样或
+  异常恰好落在 relocated prologue 时可能中断栈回溯。编码窄测试为显式脚本门禁，不随普通
+  Gradle assemble 自动执行。
+
 ### USB v6/v12 回归（2026-07-15）
 
 - `:app:assembleDebug`、`:app:assembleDebugAndroidTest`、`:app:assembleRelease`、
   `:hookself:assembleRelease` 和 `:app:lintDebug` 通过；lint 为 0 errors、3 个已知环境/平台警告
   （target/compile SDK 更新提示与 arm64-only ChromeOS 提示）。
-- Release AAR 为 1,231,422 字节，metadata 为 `minCompileSdk=24`、extension 0；包含 arm64-v8a
-  Prefab 库、`framework.h`、`public_api.h` 与 `c++_shared`。stripped `libhookself.so` 为
-  345,968 字节，动态导出仅 38 个 `hookself_*`（其中 20 个 facade），测试符号/字符串为 0。
+- 当前 Release AAR 为 1,396,057 字节，metadata 为 `minCompileSdk=24`、extension 0；包含
+  syscall/path、inline 与 ELF 三个 arm64-v8a Prefab 库、四个公共头和 `c++_shared`。stripped
+  `libhookself.so` 仍为 345,968 字节并仅导出 38 个 `hookself_*`（其中 20 个 facade）；独立
+  inline 库与门禁见上一节。
 - 单轮 instrumentation 的 `frameworkOnly`、`procVirtualResidentOnly`、`residentOnly` 和
   `repeatAll` 均通过。`frameworkOnly` 的 framework API self-test 为 `PASS`、failures 为 0、
   `chroot_path_result=0`；facade 覆盖 32 轮 entry/destroy、关闭后拒绝新登记、sink 内重入 destroy、

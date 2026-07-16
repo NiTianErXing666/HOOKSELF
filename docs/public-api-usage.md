@@ -7,8 +7,12 @@
 
 ## AAR/Prefab 集成
 
-本仓库中的 `:hookself` Android Library 发布 `libhookself.so` 和 Prefab 公共头。消费模块启用
-Prefab，并与库统一使用 NDK `28.2.13676358` 和 `c++_shared`：
+本仓库中的 `:hookself` Android Library 发布 syscall/path 用的 `libhookself.so`、独立的
+`libhookself_inline.so` 和 `libhookself_elf.so`，Prefab target 分别为
+`hookself::hookself`、`hookself::hookself_inline` 与 `hookself::hookself_elf`。本指南后续内容
+使用第一个；函数入口替换见 [ARM64 Inline Hook 设计与使用](inline-hook-design.md)，内存符号解析与
+PLT/GOT hook 见 [ARM64 ELF/GOT Hook 设计与使用](elf-got-hook-design.md)。消费模块启用 Prefab，
+并与库统一使用 NDK `28.2.13676358` 和 `c++_shared`：
 
 ```groovy
 android {

@@ -141,6 +141,84 @@ public class ProbeStressTest {
     }
 
     @Test
+    public void inlineHookOnly() throws Exception {
+        JSONObject result = parseFirstLine(
+                "INLINE", "HOOKSELF_INLINE_RESULT",
+                NativeTestBridge.runInlineHookSelfTest());
+        Log.i(TAG, "inline hook self-test: " + result);
+        assertEquals("inline hook verdict: " + result,
+                "PASS", result.getString("verdict"));
+        assertEquals("inline hook failures: " + result,
+                0, result.getInt("failures"));
+        assertTrue("inline hook coverage is incomplete: " + result,
+                result.getInt("checks") >= 350);
+        assertEquals("inline hook fixture count: " + result,
+                20, result.getInt("fixtures"));
+        assertTrue("inline hook expanded relocation coverage missing: " + result,
+                result.getInt("expanded_relocations") > 0);
+        assertEquals("inline hook BTI coverage: " + result,
+                1, result.getInt("bti_paths"));
+        int guardedBtiSupported = result.getInt("bti_guarded_supported");
+        assertTrue("inline hook guarded BTI support value: " + result,
+                guardedBtiSupported == 0 || guardedBtiSupported == 1);
+        assertEquals("inline hook guarded BTI coverage: " + result,
+                guardedBtiSupported, result.getInt("bti_guarded_paths"));
+        assertTrue("inline hook guarded BTI bridge value: " + result,
+                result.getInt("bti_guarded_far_bridge") == 0 ||
+                        result.getInt("bti_guarded_far_bridge") == 1);
+        assertEquals("inline hook PAC coverage: " + result,
+                2, result.getInt("pac_paths"));
+        assertEquals("inline hook unsupported relocation coverage: " + result,
+                1, result.getInt("unsupported_relocations"));
+        assertEquals("inline hook mapping retained RWX: " + result,
+                0, result.getInt("rwx_violations"));
+        assertEquals("inline hook concurrent cycle count: " + result,
+                96, result.getInt("concurrent_cycles"));
+        assertTrue("inline hook concurrent calls missing: " + result,
+                result.getLong("concurrent_calls") > 0L);
+    }
+
+    @Test
+    public void elfHookOnly() throws Exception {
+        JSONObject result = parseFirstLine(
+                "ELF", "HOOKSELF_ELF_RESULT",
+                NativeTestBridge.runElfHookSelfTest());
+        Log.i(TAG, "ELF hook self-test: " + result);
+        assertEquals("ELF hook verdict: " + result,
+                "PASS", result.getString("verdict"));
+        assertEquals("ELF hook failures: " + result,
+                0, result.getInt("failures"));
+        assertTrue("ELF hook coverage is incomplete: " + result,
+                result.getInt("checks") >= 200);
+        assertEquals("GNU hash symbol resolution: " + result,
+                1, result.getInt("gnu_resolves"));
+        assertEquals("SysV hash symbol resolution: " + result,
+                1, result.getInt("sysv_resolves"));
+        assertEquals("ELF hook cycle count: " + result,
+                103, result.getInt("hook_cycles"));
+        assertTrue("RELRO restoration coverage missing: " + result,
+                result.getInt("relro_restores") >= 3);
+        assertEquals("slot conflict coverage: " + result,
+                1, result.getInt("conflict_checks"));
+        assertEquals("loader/registry lock-order coverage: " + result,
+                1, result.getInt("lock_order_checks"));
+        assertEquals("loader callback fork coverage: " + result,
+                1, result.getInt("loader_forks"));
+        assertEquals("parallel same-page transaction coverage: " + result,
+                16, result.getInt("parallel_transactions"));
+        assertEquals("fork snapshot coverage: " + result,
+                8, result.getInt("fork_snapshots"));
+        assertEquals("execute-only replacement coverage: " + result,
+                1, result.getInt("xom_replacements"));
+        assertEquals("recovery transaction coverage: " + result,
+                2, result.getInt("recovery_transactions"));
+        assertEquals("orphaned module coverage: " + result,
+                1, result.getInt("orphaned_modules"));
+        assertTrue("concurrent GOT calls missing: " + result,
+                result.getLong("concurrent_calls") > 0L);
+    }
+
+    @Test
     public void procVirtualResidentOnly() throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context targetContext = instrumentation.getTargetContext();

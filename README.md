@@ -1,8 +1,10 @@
 # HookSelf
 
-HookSelf 是面向 Android arm64 App 自进程的 native syscall/path hook 框架。框架通过子进程
-tracer 管理 full-ptrace 或 selective-seccomp runtime，并提供统一的规则注册、启停、路径重定向、
-事件、日志和虚拟文件接口。
+HookSelf 是面向 Android arm64 App 自进程的 native hook 工程。`libhookself.so` 通过子进程
+tracer 管理 full-ptrace 或 selective-seccomp runtime，并提供统一的 syscall 规则、启停、路径
+重定向、事件、日志和虚拟文件接口；独立的 `libhookself_inline.so` 提供 ARM64 函数入口替换、
+original trampoline 和按 handle/target 移除接口；`libhookself_elf.so` 提供已加载 ELF 的
+内存动态符号解析，以及按 consumer module + imported symbol 安装和恢复 PLT/GOT hook。
 
 当前支持范围：
 
@@ -11,7 +13,9 @@ tracer 管理 full-ptrace 或 selective-seccomp runtime，并提供统一的规�
 - NDK `28.2.13676358`
 - C++ runtime `c++_shared`
 - AAR consumer `minCompileSdk 24`
-- public ABI v6
+- syscall/path public ABI v6
+- inline-hook public ABI v1
+- ELF/GOT-hook public ABI v1
 
 ## 项目结构
 
@@ -20,6 +24,18 @@ hookself/                         Android Library，产出 AAR/Prefab
   src/main/cpp/
     CMakeLists.txt
     hookself.exports.map
+    hookself_inline.exports.map
+    hookself_elf.exports.map
+    elf_hook/
+      include/hookself/
+        elf_hook.h                 内存 ELF 与 PLT/GOT hook C ABI
+      internal/                    module、hash、relocation 与权限事务
+      elf_hook.cpp                 安装/恢复与 generation 注册表
+    inline_hook/
+      include/hookself/
+        inline_hook.h              ARM64 inline-hook C ABI
+      internal/                    编码、重定位与近地址内存
+      inline_hook.cpp              安装事务与注册表
     hookself/
       include/hookself/
         framework.h               推荐的统一门面
@@ -42,8 +58,10 @@ app/                              demo 与 instrumentation 宿主
     jni/
 ```
 
-`:hookself` 拥有 `libhookself.so` 及公共头文件。`:app` 只构建 `libhookself_demo.so`，通过
-Prefab 链接库并展示调用方式；业务工程不需要复制 demo/JNI 层。
+`:hookself` AAR 同时发布 `libhookself.so`、`libhookself_inline.so`、`libhookself_elf.so` 和
+三个 Prefab module。`:app` 的 Release 只构建 `libhookself_demo.so`；Debug 额外构建 native
+fixture 做黑盒回归。业务工程不需要复制 demo/JNI 层。三个 HookSelf 动态库互不依赖，消费方
+可以只链接需要的模块。
 
 ## 接入
 
@@ -86,6 +104,20 @@ target_link_libraries(your_native_target PRIVATE
         hookself::hookself)
 ```
 
+只使用 ARM64 inline hook 时链接独立 target：
+
+```cmake
+target_link_libraries(your_native_target PRIVATE
+        hookself::hookself_inline)
+```
+
+只使用内存 ELF 解析或 PLT/GOT hook 时链接：
+
+```cmake
+target_link_libraries(your_native_target PRIVATE
+        hookself::hookself_elf)
+```
+
 消费方 native 模块应使用相同 NDK 和 `c++_shared`，并只为 `arm64-v8a` 打包 HookSelf。
 
 ## 公共接口
@@ -101,6 +133,85 @@ target_link_libraries(your_native_target PRIVATE
 
 完整示例、规则变更边界和底层 `HookselfRuntime` 进阶接口见
 [公共 API 使用指南](docs/public-api-usage.md)。
+
+### ARM64 inline hook
+
+包含 `<hookself/inline_hook.h>`，使用完整 handle API：
+
+```cpp
+using TargetFn = int (*)(int);
+static void* original_target = nullptr;
+
+static int ReplacementTarget(int value) {
+    auto original = reinterpret_cast<TargetFn>(
+            __atomic_load_n(&original_target, __ATOMIC_ACQUIRE));
+    return original(value) + 1;
+}
+
+HookselfInlineOptions options{};
+hookself_inline_default_options(&options);
+
+HookselfInlineHandle handle = HOOKSELF_INLINE_INVALID_HANDLE;
+int32_t result = hookself_inline_install(
+        reinterpret_cast<void*>(target),
+        reinterpret_cast<void*>(ReplacementTarget),
+        &options, &original_target, &handle);
+
+// target DSO 仍保持加载时，original trampoline 在 remove 后仍可调用。
+result = hookself_inline_remove(handle);
+```
+
+简化调用为 `hookself_inline_hook(target, replacement, &original)`，随后用
+`hookself_inline_unhook(target)` 移除。库在 ARM64 入口只原子替换一条 4 字节 `B`，支持
+BTI/PAC 入口和常见 PC-relative 指令重定位；无法安全重定位时会在修改 target 前返回 typed
+error。原理、全部 API、并发/内存语义和错误表见
+[ARM64 Inline Hook 设计与使用](docs/inline-hook-design.md)。
+
+编码、边界和 UB 窄测试可在已连接的 ARM64 设备上重复执行：
+
+```powershell
+.\scripts\run-inline-encoding-tests.ps1 -Serial 3B241FDJH000S4
+```
+
+inline hook、syscall 观测、路径重定向、ptrace 视图和 proc 虚拟视图是独立能力。安装一个
+inline hook 不会创建 syscall runtime；开启路径重定向或日志观测也不会自动安装函数入口 hook，
+更不会隐式启用 ptrace view。
+
+### 内存 ELF 解析与 PLT/GOT hook
+
+包含 `<hookself/elf_hook.h>`。`module_name` 是需要改写 GOT 的 caller/consumer DSO，不是导出
+函数的 provider：
+
+```cpp
+using ReadConfig = int (*)(const char*);
+static void* original_read_config = nullptr;
+static HookselfElfHandle handle = HOOKSELF_ELF_INVALID_HANDLE;
+
+static int ReplacementReadConfig(const char* path) {
+    auto original = reinterpret_cast<ReadConfig>(
+            __atomic_load_n(&original_read_config, __ATOMIC_ACQUIRE));
+    return original(path);
+}
+
+HookselfElfOptions options{};
+hookself_elf_default_options(&options);
+int32_t result = hookself_elf_install(
+        "libclient.so", "read_config",
+        reinterpret_cast<void*>(ReplacementReadConfig),
+        &options, &original_read_config, &handle);
+
+result = hookself_elf_remove(handle);
+```
+
+`hookself_elf_resolve_symbol()` 从已加载 module 的 `PT_DYNAMIC` 查询 GNU/SysV hash 与
+`.dynsym`。hook v1 只处理 ARM64 `DT_JMPREL` 中的 `R_AARCH64_JUMP_SLOT`，使用 64 位 CAS，
+临时打开并完整恢复 RELRO 页权限；它不自动接管后续 `dlopen()`，也不隐式启动另外两个
+HookSelf 模块。`RECOVERY_REQUIRED` 会同时返回有效 handle，`hookself_elf_find()` 也能找回
+该恢复态 handle，调用方应继续 `remove()`/`unhook()` 直到清理完成。多线程 `fork()` 的 child
+在 `exec()` 前只使用 `hookself_elf_get_info()` 等不进入 Android loader 的查询；HookSelf 会重置
+自己的 registry/patch 锁，但不替换 Bionic 私有 loader mutex。模块匹配、生命周期、错误恢复、
+全部 API 和 GitHub 参考审计见
+[ARM64 ELF/GOT Hook 设计与使用](docs/elf-got-hook-design.md)。
 
 ## 配置总览
 
@@ -555,8 +666,11 @@ hookself/build/outputs/aar/hookself-release.aar
 `HOOKSELF_BUILD_TEST_SUPPORT` 只在 `:hookself` Debug 构建启用；release 不编译 native
 self-test、probe 和测试 JNI bridge。
 
-Release AAR 只导出 `hookself_*` public API。当前制品包含 20 个统一 facade 入口，Prefab 公共头
-与源码逐字节一致；Debug-only self-test、fault injection 和 JNI bridge 不进入 Release。
+Release AAR 的 `libhookself.so` 只导出既有 `hookself_*` public API，其中包含 20 个统一 facade
+入口；独立 `libhookself_inline.so` 只导出 11 个 `hookself_inline_*` ABI v1 入口，独立
+`libhookself_elf.so` 只导出 13 个 `hookself_elf_*` ABI v1 入口。三个 Prefab module 的公共头与
+源码一致；Debug-only self-test、fault injection、inline/ELF fixtures 和 JNI bridge 不进入
+Release。
 
 ## 生命周期边界
 
@@ -571,5 +685,6 @@ Release AAR 只导出 `hookself_*` public API。当前制品包含 20 个统一 
 ## 文档
 
 - [公共 API 使用指南](docs/public-api-usage.md)
+- [ARM64 Inline Hook 设计与使用](docs/inline-hook-design.md)
 - [实现与验证状态](docs/implementation-status.md)
 - [自进程反向 ptrace Hook 设计](docs/ptrace-self-hook-design.md)

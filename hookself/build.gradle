@@ -61,5 +61,11 @@ android {
         hookself {
             headers 'src/main/cpp/hookself/include'
         }
+        hookself_inline {
+            headers 'src/main/cpp/inline_hook/include'
+        }
+        hookself_elf {
+            headers 'src/main/cpp/elf_hook/include'
+        }
     }
 }

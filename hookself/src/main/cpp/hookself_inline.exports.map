@@ -1,0 +1,16 @@
+HOOKSELF_INLINE_1.0 {
+    global:
+        hookself_inline_get_abi_version;
+        hookself_inline_default_options;
+        hookself_inline_validate_options;
+        hookself_inline_get_capabilities;
+        hookself_inline_install;
+        hookself_inline_hook;
+        hookself_inline_remove;
+        hookself_inline_unhook;
+        hookself_inline_find;
+        hookself_inline_get_info;
+        hookself_inline_result_string;
+    local:
+        *;
+};

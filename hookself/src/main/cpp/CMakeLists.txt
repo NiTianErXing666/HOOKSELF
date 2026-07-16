@@ -11,6 +11,99 @@ endif()
 
 set(HOOKSELF_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/hookself)
 set(HOOKSELF_PUBLIC_INCLUDE ${HOOKSELF_ROOT}/include)
+set(HOOKSELF_INLINE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/inline_hook)
+set(HOOKSELF_INLINE_PUBLIC_INCLUDE ${HOOKSELF_INLINE_ROOT}/include)
+set(HOOKSELF_ELF_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/elf_hook)
+set(HOOKSELF_ELF_PUBLIC_INCLUDE ${HOOKSELF_ELF_ROOT}/include)
+
+add_library(hookself_inline_core STATIC
+        ${HOOKSELF_INLINE_ROOT}/internal/arm64_encoding.cpp
+        ${HOOKSELF_INLINE_ROOT}/internal/arm64_relocator.cpp
+        ${HOOKSELF_INLINE_ROOT}/internal/memory.cpp)
+
+target_include_directories(hookself_inline_core PRIVATE
+        ${HOOKSELF_INLINE_PUBLIC_INCLUDE}
+        ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hookself_inline_core PRIVATE cxx_std_17)
+target_compile_definitions(hookself_inline_core PRIVATE _GNU_SOURCE)
+target_compile_options(hookself_inline_core PRIVATE
+        -Wall
+        -Wextra
+        -Werror=return-type
+        -fno-exceptions
+        -fno-rtti
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden)
+set_target_properties(hookself_inline_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON)
+
+add_library(hookself_inline SHARED
+        ${HOOKSELF_INLINE_ROOT}/inline_hook.cpp)
+
+target_include_directories(hookself_inline
+        PUBLIC ${HOOKSELF_INLINE_PUBLIC_INCLUDE}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hookself_inline PRIVATE cxx_std_17)
+target_compile_definitions(hookself_inline PRIVATE
+        _GNU_SOURCE
+        HOOKSELF_INLINE_BUILDING_LIBRARY=1)
+target_compile_options(hookself_inline PRIVATE
+        -Wall
+        -Wextra
+        -Werror=return-type
+        -fno-exceptions
+        -fno-rtti
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden)
+target_link_options(hookself_inline PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hookself_inline.exports.map"
+        -Wl,--exclude-libs,ALL)
+target_link_libraries(hookself_inline PRIVATE hookself_inline_core)
+
+add_library(hookself_elf_core STATIC
+        ${HOOKSELF_ELF_ROOT}/internal/elf_image.cpp
+        ${HOOKSELF_ELF_ROOT}/internal/memory.cpp)
+
+target_include_directories(hookself_elf_core PRIVATE
+        ${HOOKSELF_ELF_PUBLIC_INCLUDE}
+        ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hookself_elf_core PRIVATE cxx_std_17)
+target_compile_definitions(hookself_elf_core PRIVATE _GNU_SOURCE)
+target_compile_options(hookself_elf_core PRIVATE
+        -Wall
+        -Wextra
+        -Werror=return-type
+        -fno-exceptions
+        -fno-rtti
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden)
+set_target_properties(hookself_elf_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON)
+
+add_library(hookself_elf SHARED
+        ${HOOKSELF_ELF_ROOT}/elf_hook.cpp)
+
+target_include_directories(hookself_elf
+        PUBLIC ${HOOKSELF_ELF_PUBLIC_INCLUDE}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hookself_elf PRIVATE cxx_std_17)
+target_compile_definitions(hookself_elf PRIVATE
+        _GNU_SOURCE
+        HOOKSELF_ELF_BUILDING_LIBRARY=1)
+target_compile_options(hookself_elf PRIVATE
+        -Wall
+        -Wextra
+        -Werror=return-type
+        -fno-exceptions
+        -fno-rtti
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden)
+target_link_options(hookself_elf PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hookself_elf.exports.map"
+        -Wl,--exclude-libs,ALL)
+target_link_libraries(hookself_elf PRIVATE
+        dl
+        hookself_elf_core)
 
 add_library(hookself_tracer_core STATIC
         ${HOOKSELF_ROOT}/platform/raw_syscall_arm64.cpp

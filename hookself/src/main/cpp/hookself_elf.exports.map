@@ -1,0 +1,18 @@
+HOOKSELF_ELF_1.0 {
+    global:
+        hookself_elf_get_abi_version;
+        hookself_elf_default_options;
+        hookself_elf_validate_options;
+        hookself_elf_get_capabilities;
+        hookself_elf_get_module_info;
+        hookself_elf_resolve_symbol;
+        hookself_elf_install;
+        hookself_elf_hook;
+        hookself_elf_remove;
+        hookself_elf_unhook;
+        hookself_elf_find;
+        hookself_elf_get_info;
+        hookself_elf_result_string;
+    local:
+        *;
+};
