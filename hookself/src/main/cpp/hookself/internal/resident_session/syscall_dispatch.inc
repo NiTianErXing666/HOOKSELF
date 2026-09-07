@@ -104,6 +104,15 @@ int ProcessSyscallEntry(TracerContext* context, TaskRecord* task,
         if (proc_view_error != 0) {
             return proc_view_error;
         }
+        const int proc_stat_view_error = ApplyProcStatReadView(context, task);
+        if (proc_stat_view_error != 0) {
+            return proc_stat_view_error;
+        }
+        const int proc_wchan_view_error =
+                ApplyProcWchanReadView(context, task);
+        if (proc_wchan_view_error != 0) {
+            return proc_wchan_view_error;
+        }
     }
     EmitSyscallEvent(context, task, syscall_number,
                      HOOKSELF_SYSCALL_PHASE_ENTRY, arguments, 0,
@@ -166,6 +175,16 @@ int ProcessSyscallExit(TracerContext* context, TaskRecord* task,
     }
     const bool restarting = IsKernelRestartResult(proc_visible_result);
     error = CompleteProcStatusReadView(
+            context, task, proc_visible_result);
+    if (error != 0) {
+        return error;
+    }
+    error = CompleteProcStatReadView(
+            context, task, proc_visible_result);
+    if (error != 0) {
+        return error;
+    }
+    error = CompleteProcWchanReadView(
             context, task, proc_visible_result);
     if (error != 0) {
         return error;

@@ -155,6 +155,14 @@ void EmitSyscallPolicyEvent(TracerContext* context, const TaskRecord& task,
         event.flags |= HOOKSELF_EVENT_F_PROC_STATUS_VIEW;
     }
     if ((task.active_syscall.flags &
+         hookself::tracer::kActiveSyscallProcStatView) != 0) {
+        event.flags |= HOOKSELF_EVENT_F_PROC_STAT_VIEW;
+    }
+    if ((task.active_syscall.flags &
+         hookself::tracer::kActiveSyscallProcWchanView) != 0) {
+        event.flags |= HOOKSELF_EVENT_F_PROC_WCHAN_VIEW;
+    }
+    if ((task.active_syscall.flags &
          hookself::tracer::kActiveSyscallNestedPtraceDispatch) != 0U) {
         event.flags |= HOOKSELF_EVENT_F_NESTED_PTRACE;
     }

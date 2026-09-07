@@ -393,6 +393,149 @@ bool ProcStatusPath(const char* path, size_t length) noexcept {
     return true;
 }
 
+// "/proc/..." 前缀 + "/stat" 后缀。"/statm" 因后缀多一个字符不会误配。
+bool ProcStatPath(const char* path, size_t length) noexcept {
+    constexpr char kPrefix[] = "/proc/";
+    constexpr char kSuffix[] = "/stat";
+    if (path == nullptr || length < sizeof(kPrefix) - 1U +
+                                       sizeof(kSuffix) - 1U) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(kPrefix) - 1U; ++i) {
+        if (path[i] != kPrefix[i]) {
+            return false;
+        }
+    }
+    const size_t suffix_start = length - (sizeof(kSuffix) - 1U);
+    for (size_t i = 0; i < sizeof(kSuffix) - 1U; ++i) {
+        if (path[suffix_start + i] != kSuffix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// "/proc/..." 前缀 + "/wchan" 后缀。
+bool ProcWchanPath(const char* path, size_t length) noexcept {
+    constexpr char kPrefix[] = "/proc/";
+    constexpr char kSuffix[] = "/wchan";
+    if (path == nullptr || length < sizeof(kPrefix) - 1U +
+                                       sizeof(kSuffix) - 1U) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(kPrefix) - 1U; ++i) {
+        if (path[i] != kPrefix[i]) {
+            return false;
+        }
+    }
+    const size_t suffix_start = length - (sizeof(kSuffix) - 1U);
+    for (size_t i = 0; i < sizeof(kSuffix) - 1U; ++i) {
+        if (path[suffix_start + i] != kSuffix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ProcPathPrefixEquals(const char* path, const char* prefix,
+                          size_t prefix_length) noexcept {
+    for (size_t i = 0; i < prefix_length; ++i) {
+        if (path[i] != prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 从 "/proc/<N>/..." 或 "/proc/self|thread-self[/task/<T>]/..." 解析出
+// proc 文件归属的进程/TID。"self" 解析为读取者的 tgid，"task/<T>" 覆盖为 T。
+int ParseProcFileOwnerPid(const char* path, size_t length,
+                          int32_t reader_tgid, int32_t* owner) noexcept {
+    if (path == nullptr || owner == nullptr || reader_tgid <= 0) {
+        return EINVAL;
+    }
+    *owner = 0;
+    constexpr char kPrefix[] = "/proc/";
+    constexpr size_t kPrefixLength = sizeof(kPrefix) - 1U;
+    if (length < kPrefixLength + 2U ||
+        !ProcPathPrefixEquals(path, kPrefix, kPrefixLength)) {
+        return EPROTO;
+    }
+    size_t cursor = kPrefixLength;
+    size_t seg_start = cursor;
+    while (cursor < length && path[cursor] != '/') {
+        ++cursor;
+    }
+    if (cursor == seg_start) {
+        return EPROTO;
+    }
+    const size_t seg_length = cursor - seg_start;
+    int64_t owner_value = -1;
+    if (seg_length == 4 && path[seg_start] == 's' &&
+        path[seg_start + 1U] == 'e' && path[seg_start + 2U] == 'l' &&
+        path[seg_start + 3U] == 'f') {
+        owner_value = reader_tgid;
+    } else if (seg_length == 11 &&
+               path[seg_start] == 't' && path[seg_start + 1U] == 'h' &&
+               path[seg_start + 2U] == 'r' && path[seg_start + 3U] == 'e' &&
+               path[seg_start + 4U] == 'a' && path[seg_start + 5U] == 'd' &&
+               path[seg_start + 6U] == '-' && path[seg_start + 7U] == 's' &&
+               path[seg_start + 8U] == 'e' && path[seg_start + 9U] == 'l' &&
+               path[seg_start + 10U] == 'f') {
+        // thread-self 归属读取线程所在线程组
+        owner_value = reader_tgid;
+    } else {
+        owner_value = 0;
+        bool digits = true;
+        for (size_t i = 0; i < seg_length; ++i) {
+            if (path[seg_start + i] < '0' || path[seg_start + i] > '9') {
+                digits = false;
+                break;
+            }
+            owner_value = owner_value * 10 + (path[seg_start + i] - '0');
+            if (owner_value > INT32_MAX) {
+                return EPROTO;
+            }
+        }
+        if (!digits || owner_value <= 0) {
+            return EPROTO;
+        }
+    }
+    // "/proc/<N>/task/<T>/status|stat" 归属线程 T
+    if (cursor < length) {
+        size_t rest = cursor + 1U;
+        constexpr char kTask[] = "task/";
+        constexpr size_t kTaskLength = sizeof(kTask) - 1U;
+        if (length - rest >= kTaskLength &&
+            ProcPathPrefixEquals(path + rest, kTask, kTaskLength)) {
+            rest += kTaskLength;
+            const size_t tid_start = rest;
+            while (rest < length && path[rest] != '/') {
+                ++rest;
+            }
+            if (rest == tid_start) {
+                return EPROTO;
+            }
+            int64_t tid_value = 0;
+            for (size_t i = tid_start; i < rest; ++i) {
+                if (path[i] < '0' || path[i] > '9') {
+                    return EPROTO;
+                }
+                tid_value = tid_value * 10 + (path[i] - '0');
+                if (tid_value > INT32_MAX) {
+                    return EPROTO;
+                }
+            }
+            if (tid_value <= 0) {
+                return EPROTO;
+            }
+            owner_value = tid_value;
+        }
+    }
+    *owner = static_cast<int32_t>(owner_value);
+    return 0;
+}
+
 int ResolveTargetFdPath(const TaskRecord* task, int32_t fd, char* output,
                         size_t capacity, size_t* output_length) noexcept {
     char proc_path[96]{};

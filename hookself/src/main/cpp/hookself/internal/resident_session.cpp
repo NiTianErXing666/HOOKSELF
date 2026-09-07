@@ -40,6 +40,8 @@ namespace hookself::internal {
 #include "resident_session/syscall_rules.inc"
 #include "resident_session/protected_fd.inc"
 #include "resident_session/proc_status.inc"
+#include "resident_session/proc_stat.inc"
+#include "resident_session/proc_wchan.inc"
 #include "resident_session/policy_application.inc"
 #include "resident_session/path_redirect.inc"
 #include "resident_session/proc_virtual.inc"

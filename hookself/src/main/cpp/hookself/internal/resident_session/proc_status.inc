@@ -3,11 +3,56 @@ bool IsProcStatusReadSyscall(int32_t syscall_number) noexcept {
            syscall_number == __NR_readv;
 }
 
+// 文件归属 pid 是否属于本 trace 树（target 或任何已跟踪任务）。
+// task table 只含 trace 树成员，扫描即可；后代进程（TRACE_DESCENDANTS 下
+// fork/exec 的 cat 等）也在此表内，从而被 proc 视图覆盖。
+bool IsTraceTreePid(TracerContext* context, int32_t pid) noexcept {
+    if (context == nullptr || context->tasks == nullptr || pid <= 0) {
+        return false;
+    }
+    if (pid == context->target_pid) {
+        return true;
+    }
+    for (uint32_t slot = 0; slot < hookself::tracer::Capacity(); ++slot) {
+        const TaskRecord* candidate =
+                hookself::tracer::At(context->tasks, slot);
+        if (candidate != nullptr &&
+            (candidate->tgid == pid || candidate->tid == pid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 路径里的归属 pid 可能是线程 TID（"/proc/<tid>/..."、"task/<T>"/..."），
+// 而 status 内容里的 Tgid 恒为线程组 ID。查任务表把 pid 解析成内容比对用的
+// tgid；查不到（任务已退出/pid 复用）返回错误，调用方按放行处理。
+int ResolveProcOwnerTgid(TracerContext* context, int32_t owner_pid,
+                         int32_t* owner_tgid) noexcept {
+    if (context == nullptr || context->tasks == nullptr ||
+        owner_pid <= 0 || owner_tgid == nullptr) {
+        return EINVAL;
+    }
+    if (owner_pid == context->target_pid) {
+        *owner_tgid = owner_pid;
+        return 0;
+    }
+    for (uint32_t slot = 0; slot < hookself::tracer::Capacity(); ++slot) {
+        const TaskRecord* candidate =
+                hookself::tracer::At(context->tasks, slot);
+        if (candidate != nullptr &&
+            (candidate->tid == owner_pid || candidate->tgid == owner_pid)) {
+            *owner_tgid = candidate->tgid;
+            return 0;
+        }
+    }
+    return ENOENT;
+}
+
 int ApplyProcStatusReadView(TracerContext* context,
                             TaskRecord* task) noexcept {
     if ((context->control->config_flags &
          HOOKSELF_CONFIG_ENABLE_PTRACE_VIEW) == 0 ||
-        task->tgid != context->target_pid ||
         !IsProcStatusReadSyscall(task->active_syscall.syscall_number)) {
         return 0;
     }
@@ -24,19 +69,41 @@ int ApplyProcStatusReadView(TracerContext* context,
         !ProcStatusPath(resolved, resolved_length)) {
         return 0;
     }
+    // 归属校验：只虚拟化 trace 树成员的 status（含 target 自身与后代），
+    // 外部进程的 proc 文件原样放行。路径 pid 可能是线程 TID，先解析成
+    // 内容 Tgid 比对用的 tgid。
+    int32_t owner = 0;
+    const int owner_error = ParseProcFileOwnerPid(
+            resolved, resolved_length, task->tgid, &owner);
+    if (owner_error != 0) {
+        return 0;
+    }
+    int32_t owner_tgid = 0;
+    if (ResolveProcOwnerTgid(context, owner, &owner_tgid) != 0 ||
+        !IsTraceTreePid(context, owner_tgid)) {
+        return 0;
+    }
 
     uint8_t source[kProcStatusReadCapacity]{};
     size_t source_size = 0;
     const int read_error = ReadLocalFile(
             resolved, source, sizeof(source), &source_size);
     if (read_error != 0) {
-        return read_error;
+        // target 自读保持历史严格语义，其余场景一律放行，避免竞态
+        // （fd 指向已退出任务等）把整个 trace 会话打死。
+        return owner_tgid == task->tgid &&
+                               owner_tgid == context->target_pid
+               ? read_error
+               : 0;
     }
     ProcStatusMetadata metadata{};
     const int parse_error = ParseProcStatusMetadata(
-            source, source_size, context->target_pid, &metadata);
+            source, source_size, owner_tgid, &metadata);
     if (parse_error != 0) {
-        return parse_error;
+        return owner_tgid == task->tgid &&
+                               owner_tgid == context->target_pid
+               ? parse_error
+               : 0;
     }
     task->active_syscall.flags |=
             hookself::tracer::kActiveSyscallProcStatusView;
@@ -177,7 +244,11 @@ int ScatterProcStatusReadOutput(const TaskRecord* task, int64_t result,
 }
 
 size_t RewriteProcStatusReadOutput(uint8_t* output, size_t size) noexcept {
-    return RewriteTracerPidValue(output, size);
+    // TracerPid 与 State 行都必须虚拟化且等长：
+    // 只藏 TracerPid 会留下 "State: t (tracing stop)" 的自相矛盾证据
+    size_t rewritten = RewriteTracerPidValue(output, size);
+    rewritten += RewriteProcStatusStateLine(output, size);
+    return rewritten;
 }
 
 int CompleteProcStatusReadView(TracerContext* context, TaskRecord* task,

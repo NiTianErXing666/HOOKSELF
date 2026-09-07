@@ -92,6 +92,8 @@ enum ActiveSyscallFlags : uint32_t {
     kActiveSyscallProcVirtualView = 1U << 18,
     kActiveSyscallProcVirtualReplay = 1U << 19,
     kActiveSyscallNestedPtraceDispatch = 1U << 20,
+    kActiveSyscallProcStatView = 1U << 21,
+    kActiveSyscallProcWchanView = 1U << 22,
 };
 
 struct Arm64RegisterSnapshot {
