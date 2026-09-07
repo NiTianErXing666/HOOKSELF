@@ -4,6 +4,7 @@
     <string name="attach_self">附加自己</string>
     <string name="open_stat_status">open/stat /proc/self/status</string>
     <string name="ptrace_check">ptrace 检测</string>
+    <string name="anti_debug_check">AntiDebug 检测</string>
     <string name="demo_detached">未附加</string>
     <string name="demo_attaching">正在附加</string>
     <string name="demo_attached">已附加</string>

@@ -17,6 +17,9 @@
 
 #include "hookself/framework.h"
 
+// 反调试检测模块 (app/src/main/cpp/demo/anti_debug.cpp)
+unsigned ad_detect_all(std::string* report);
+
 namespace hookself::demo {
 namespace {
 
@@ -114,6 +117,70 @@ void InitializeObserveRule(HookselfSyscallRule* rule, uint32_t rule_id,
     rule->syscall_number = syscall_number;
     rule->action = HOOKSELF_SYSCALL_OBSERVE;
     rule->phase_mask = HOOKSELF_SYSCALL_PHASE_BOTH;
+}
+
+// syscall 号 => 可读名（arm64 asm-generic 编号，只列观测相关的，其余按 sys#N 输出）
+const char* SyscallName(int32_t number) noexcept {
+    switch (number) {
+        case 291: return "statx";
+        case 56:  return "openat";
+        case 57:  return "close";
+        case 63:  return "read";
+        case 79:  return "newfstatat";
+        case 93:  return "exit";
+        case 94:  return "exit_group";
+        case 117: return "ptrace";
+        case 129: return "kill";
+        case 167: return "prctl";
+        case 172: return "getpid";
+        case 178: return "gettid";
+        case 220: return "clone";
+        case 221: return "execve";
+        default:  return nullptr;
+    }
+}
+
+// 每条观测事件同步打到 logcat tag=HookselfEvents，标出虚拟视图命中标记
+void DemoEventSink(int32_t level, const HookselfEvent* event,
+                   const char* message, void* /*user_data*/) noexcept {
+    if (event == nullptr) {
+        if (message != nullptr) {
+            (void)__android_log_print(static_cast<int>(level), "HookselfEvents",
+                                      "MSG %s", message);
+        }
+        return;
+    }
+    if (event->kind != HOOKSELF_EVENT_SYSCALL) {
+        return;
+    }
+    const char* name = SyscallName(event->syscall_number);
+    char sys[24];
+    if (name == nullptr) {
+        (void)snprintf(sys, sizeof(sys), "sys%d", event->syscall_number);
+        name = sys;
+    }
+    uint32_t view_flags = event->flags & (HOOKSELF_EVENT_F_PTRACE_VIEW |
+                                          HOOKSELF_EVENT_F_PROC_STATUS_VIEW |
+                                          HOOKSELF_EVENT_F_PROC_STAT_VIEW |
+                                          HOOKSELF_EVENT_F_PROC_WCHAN_VIEW);
+    (void)__android_log_print(static_cast<int>(level), "HookselfEvents",
+                              "seq=%llu tid=%d sys=%s phase=%s ret=%ld err=%d "
+                              "path='%s' flags=0x%x%s%s%s%s",
+                              (unsigned long long)event->sequence, event->tid,
+                              name,
+                              (event->phase & HOOKSELF_SYSCALL_PHASE_ENTRY)
+                                      ? ((event->phase & HOOKSELF_SYSCALL_PHASE_EXIT)
+                                                 ? "BOTH" : "ENTRY") : "EXIT",
+                              (long)event->result, event->error,
+                              event->path, event->flags,
+                              (view_flags & HOOKSELF_EVENT_F_PTRACE_VIEW)
+                                      ? " [VPTRACE]" : "",
+                              (view_flags & HOOKSELF_EVENT_F_PROC_STATUS_VIEW)
+                                      ? " [VSTATUS]" : "",
+                              (view_flags & HOOKSELF_EVENT_F_PROC_STAT_VIEW)
+                                      ? " [VSTAT]" : "",
+                              (view_flags & HOOKSELF_EVENT_F_PROC_WCHAN_VIEW)
+                                      ? " [VWCHAN]" : "");
 }
 
 DrainReport DrainLogsLocked() noexcept {
@@ -285,6 +352,10 @@ std::string AttachSelf() {
                                           ? hookself_framework_create(
                                                     &config, &framework)
                                           : HOOKSELF_E_INVALID_STATE;
+    if (create_result == HOOKSELF_OK && framework != nullptr) {
+        // sink 在 start 前安装，事件经由 drain_logs 同步回调
+        (void)hookself_framework_set_log_sink(framework, &DemoEventSink, nullptr);
+    }
     int32_t register_result = create_result;
     for (const HookselfSyscallRule& rule : rules) {
         if (register_result != HOOKSELF_OK) {
@@ -422,6 +493,19 @@ std::string RunPtraceDetection() {
             ",\"drain_result\":" + std::to_string(drain.result) +
             ",\"logs_consumed\":" + std::to_string(drain.consumed) +
             ",\"logs_emitted\":" + std::to_string(drain.emitted) + "}");
+}
+
+std::string RunAntiDebug() {
+    std::string report;
+    const unsigned bits = ad_detect_all(&report);
+    (void)__android_log_write(ANDROID_LOG_INFO, "AntiDebug", report.c_str());
+    // 检测产生的 openat/read/clone/execve 事件全在 ring 里，drain 后经 sink 打到 logcat
+    const DrainReport drain = DrainLogsLocked();
+    return report + "HOOKSELF_DEMO_ANTIDEBUG {\"bits\":" +
+           std::to_string(bits) + ",\"drain_result\":" +
+           std::to_string(drain.result) + ",\"logs_consumed\":" +
+           std::to_string(drain.consumed) + ",\"logs_emitted\":" +
+           std::to_string(drain.emitted) + "}\n";
 }
 
 #if defined(HOOKSELF_DEMO_BUILD_TEST_SUPPORT)

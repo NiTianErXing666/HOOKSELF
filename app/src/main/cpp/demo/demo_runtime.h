@@ -8,6 +8,7 @@ bool IsAttached() noexcept;
 std::string AttachSelf();
 std::string OpenStatProcStatus();
 std::string RunPtraceDetection();
+std::string RunAntiDebug();
 #if defined(HOOKSELF_DEMO_BUILD_TEST_SUPPORT)
 std::string DetachSelf();
 #endif

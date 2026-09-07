@@ -48,3 +48,11 @@ Java_com_io_hookself_MainActivity_runPtraceDetectionForLogging(
             env, hookself::demo::RunPtraceDetection,
             "HOOKSELF_DEMO_PTRACE {\"verdict\":\"INTERNAL_ERROR\"}");
 }
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_io_hookself_MainActivity_runAntiDebugForLogging(
+        JNIEnv* env, jobject) {
+    return RunDemoAction(
+            env, hookself::demo::RunAntiDebug,
+            "HOOKSELF_DEMO_ANTIDEBUG {\"verdict\":\"INTERNAL_ERROR\"}");
+}

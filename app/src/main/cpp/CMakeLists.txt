@@ -6,6 +6,7 @@ find_package(hookself REQUIRED CONFIG)
 
 add_library(hookself_demo SHARED
         demo/demo_runtime.cpp
+        demo/anti_debug.cpp
         jni/demo_jni.cpp)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

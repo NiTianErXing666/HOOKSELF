@@ -43,6 +43,8 @@ public class MainActivity extends AppCompatActivity {
                 R.string.demo_running, false, this::openStatProcStatusForLogging));
         binding.ptraceCheck.setOnClickListener(view -> runDemoAction(
                 R.string.demo_running, false, this::runPtraceDetectionForLogging));
+        binding.antiDebugCheck.setOnClickListener(view -> runDemoAction(
+                R.string.demo_running, false, this::runAntiDebugForLogging));
 
         attached = isSelfAttachedForLogging();
         binding.sessionStatus.setText(attached
@@ -112,6 +114,7 @@ public class MainActivity extends AppCompatActivity {
         binding.attachSelf.setEnabled(!busy && !attached);
         binding.openStatStatus.setEnabled(!busy && attached);
         binding.ptraceCheck.setEnabled(!busy && attached);
+        binding.antiDebugCheck.setEnabled(!busy && attached);
         binding.operationProgress.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
@@ -146,4 +149,6 @@ public class MainActivity extends AppCompatActivity {
     public native String openStatProcStatusForLogging();
 
     public native String runPtraceDetectionForLogging();
+
+    public native String runAntiDebugForLogging();
 }
